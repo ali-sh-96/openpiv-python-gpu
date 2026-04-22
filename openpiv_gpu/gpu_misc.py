@@ -84,7 +84,7 @@ def fill_kernel(f, kernels, size, n_kernels, ic, jc):
     f[k_kernels[:, cp.newaxis, cp.newaxis], i_kernels, j_kernels] = kernels
     return f
 
-def invert_y(y, v):
+def invert_y(y, v, yt):
     """ Inverts y axis.
     
     Parameters
@@ -93,6 +93,8 @@ def invert_y(y, v):
         2D array of y values.
     v : ndarray
         2D array of v velocity values.
+    yt : float
+        maximum range of y axis.
     
     Returns
     -------
@@ -102,6 +104,6 @@ def invert_y(y, v):
         2D array with negated v velocity values.
     
     """
-    y = y[::-1, :]
+    y = yt - y
     v *= -1
     return y, v

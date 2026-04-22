@@ -1,11 +1,12 @@
 """This module contains GPU-accelerated validation algorithms."""
 
 import cupy as cp
+from math import ceil
 from cupyx.scipy.sparse import csr_matrix
 from cupyx.scipy.sparse.linalg import spsolve
 
-from . import DTYPE_f
-from .gpu_misc import get_stack, fill_kernel
+from . import DTYPE_i, DTYPE_f
+from .gpu_misc import get_stack
 
 # Default validation settings.
 VALIDATION_SIZE = 1
@@ -18,6 +19,7 @@ RMS_TOL = None
 # Default replacement settings.
 REPLACING_METHOD = "spring"
 REPLACING_SIZE = 1
+BLOCK_SIZE = 8
 
 # Allowed settings.
 ALLOWED_REPLACING_METHODS = {"spring", "median", "mean"}
@@ -249,6 +251,8 @@ class ReplacementGPU:
     ----------
     f_shape : tuple
         Shape of the input arrays.
+    modules: RawModule
+        Raw CUDA kernel for filling the linkage matrix.
     method : {"spring", "median", "mean"}, optional
         Method to use for replacement.
     size : int, optional
@@ -263,17 +267,20 @@ class ReplacementGPU:
     
     """
     def __init__(self, f_shape,
+                 modules,
                  method=REPLACING_METHOD,
                  size=REPLACING_SIZE,
                  dtype_f=DTYPE_f):
         
         self.f_shape = f_shape
+        self.mod_fill_matrix = modules
         self.method = method
         self.size = size
         assert all(self.size <= item for item in self.f_shape), "size cannot exceed field_shape."
         self.kernel_size = 2 * self.size + 1
         self.f_padded_shape = tuple(wd + 2 * self.size for wd in self.f_shape)
         self.dtype_f = dtype_f
+        self.dtype_i = cp.int32 if dtype_f is not DTYPE_f else DTYPE_i
         
         # Initialize the replacement kernel.
         if self.method == "spring":            
@@ -343,21 +350,21 @@ class ReplacementGPU:
         
         # Get the indices of the validation locations in the padded fields.
         i_vals, j_vals = cp.where(self.val_locations)
+        i_vals, j_vals = i_vals.astype(self.dtype_i), j_vals.astype(self.dtype_i)
         i_vals, j_vals = i_vals + self.size, j_vals + self.size
         
-        # Create a 3D array as a placeholder.
-        f = cp.zeros((self.n_vals, *self.f_padded_shape), dtype=self.dtype_f)
-        
-        # Generate a 3D array of kernels.
-        kernels = cp.zeros((self.n_vals, self.kernel_size, self.kernel_size), dtype=self.dtype_f)
-        kernels[:, self.size, self.size] = 1
-        kernels[:, self.i_kernels, self.j_kernels] = coef[:, cp.newaxis]
+        # Create the link matrix.
+        link = cp.zeros((self.n_vals, self.n_vals), dtype=self.dtype_f)
+        block_size = BLOCK_SIZE ** 2
+        grid_size = ceil(self.n_vals * self.n_vals / block_size)
         
         # Fill the link matrix by choosing from the placeholder.
-        fill_kernel(f, kernels, self.size, self.n_vals, i_vals, j_vals)
-        link = csr_matrix(f[:, i_vals, j_vals])
+        cuda_fill_matrix = self.mod_fill_matrix.get_function("cuda_fill_matrix")
+        cuda_fill_matrix((grid_size, 1), (block_size, 1, 1), 
+                         (link, coef, self.dtype_i(self.size), self.dtype_i(self.n_vals), i_vals, j_vals))
         
         # Solve the spring system with the sparse link matrix.
+        link = csr_matrix(link)
         f = [spsolve(link, rhs[k].T) for k in range(self.n_fields)]
         
         return f
@@ -413,3 +420,41 @@ class ReplacementGPU:
     def unresolved(self):
         """Returns an array containing the locations of unsuccessful replacements."""
         return cp.logical_and(cp.any(cp.stack([cp.isnan(self.f[k]) for k in range(self.n_fields)], axis=0), axis=0), self.val_locations)
+
+code_fill_matrix = """
+#if USE_LONG
+    #define FLOAT long float
+    #define INT long int
+#else
+    #define FLOAT float
+    #define INT int
+#endif
+
+extern "C" __global__ void cuda_fill_matrix(
+    FLOAT *link,
+    FLOAT *coef,
+    INT size,
+    INT n_vals,
+    INT *i_vals,
+    INT *j_vals
+)
+{
+    // x blocks are matrix elements.
+    INT t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= n_vals * n_vals) {return;}
+    
+    // Map the indices.
+    INT j = t % n_vals;
+    INT i = t / n_vals;
+    
+    if (i == j) {
+        link[i * n_vals + j] = 1;
+    }
+    else if ((i_vals[i] == i_vals[j]) && abs(j_vals[i] - j_vals[j]) == size) {
+        link[i * n_vals + j] = coef[i];
+    }
+    else if ((j_vals[i] == j_vals[j]) && abs(i_vals[i] - i_vals[j]) == size) {
+        link[i * n_vals + j] = coef[i];
+    }
+}
+"""

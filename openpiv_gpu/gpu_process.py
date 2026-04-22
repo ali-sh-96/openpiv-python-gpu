@@ -13,6 +13,7 @@ from cupyx.scipy.interpolate import RegularGridInterpolator
 from . import DTYPE_i, DTYPE_f
 from .gpu_validation import ValidationGPU, VALIDATION_SIZE, S2N_TOL, MEDIAN_TOL, MAD_TOL, MEAN_TOL, RMS_TOL
 from .gpu_validation import ReplacementGPU, REPLACING_METHOD, REPLACING_SIZE, ALLOWED_REPLACING_METHODS
+from .gpu_validation import code_fill_matrix
 from .gpu_smoothn import SmoothnGPU, SMOOTHING_PAR
 from .gpu_misc import count_nonzero, fill_kernel
 
@@ -23,6 +24,7 @@ SHRINK_RATIO = 1
 CENTER = True
 DEFORMING_ORDER = 1
 NORMALIZE = True
+MASK_ZERO = False
 SUBPIXEL_METHOD = "gaussian"
 N_FFT = 2
 DEFORMING_PAR = 0.5
@@ -70,6 +72,7 @@ class piv_gpu:
         shrink_ratio = kwargs["shrink_ratio"] if "shrink_ratio" in kwargs else SHRINK_RATIO
         center = kwargs["center"] if "center" in kwargs else CENTER
         normalize = kwargs["normalize"] if "normalize" in kwargs else NORMALIZE
+        mask_zero = kwargs["mask_zero"] if "mask_zero" in kwargs else MASK_ZERO
         subpixel_method = kwargs["subpixel_method"] if "subpixel_method" in kwargs else SUBPIXEL_METHOD
         n_fft = kwargs["n_fft"] if "n_fft" in kwargs else N_FFT
         deforming_par = kwargs["deforming_par"] if "deforming_par" in kwargs else DEFORMING_PAR
@@ -138,6 +141,9 @@ class piv_gpu:
             len(self.normalize) >= self.num_passes and \
                 all(isinstance(item, bool) for item in self.normalize), \
                     "{} must be a tuple of {} values, defined for all passes.".format("normalize", "bool")
+        
+        self.mask_zero = mask_zero
+        assert isinstance(self.mask_zero, bool), "{} must have a {} value.".format("mask_zero", "bool")
         
         self.subpixel_method = (subpixel_method,) * self.num_passes if isinstance(subpixel_method, str) else subpixel_method
         assert isinstance(self.subpixel_method, tuple) and \
@@ -306,7 +312,9 @@ class piv_gpu:
         
         """
         frames = [frame_a, frame_b]
-        assert all(isinstance(frame, np.ndarray) for frame in frames) and \
+        types = (np.ndarray, cp.ndarray)
+        
+        assert all(isinstance(frame, types) for frame in frames) and \
             all(frame.shape == self.frame_shape for frame in frames) and \
                 all(np.issubdtype(frame.dtype, np.number) for frame in frames) and \
                     all(not np.iscomplex(frame).any() for frame in frames), \
@@ -404,6 +412,8 @@ class PIVGPU:
         Order of the interpolation used for window deformation.
     normalize : bool or tuple, optional
         Whether to normalize the window intensity by subtracting the mean intensity.
+    mask_zero: bool, optional
+        Whether to mask the center of the cross-correlation map.
     subpixel_method : {"gaussian", "centroid", "parabolic"} or tuple, optional
         Method to estimate the subpixel location of the peak at each iteration.
     n_fft : int or tuple, optional
@@ -471,6 +481,7 @@ class PIVGPU:
                  center=CENTER,
                  deforming_order=DEFORMING_ORDER,
                  normalize=NORMALIZE,
+                 mask_zero=MASK_ZERO,
                  subpixel_method=SUBPIXEL_METHOD,
                  n_fft=N_FFT,
                  deforming_par=DEFORMING_PAR,
@@ -502,11 +513,12 @@ class PIVGPU:
         self.overlap_ratio = (overlap_ratio,) * self.n_passes if overlap_ratio == 0 or \
             isinstance(overlap_ratio, float) else overlap_ratio
         self.shrink_ratio = shrink_ratio
-        self.center = center
+        self.is_centered = center
         
         # Correlation settings.
         self.deforming_order = (deforming_order,) * self.n_passes if isinstance(deforming_order, int) else deforming_order
         self.is_normalized = (normalize,) * self.n_passes if isinstance(normalize, bool) else normalize
+        self.is_masked = (mask_zero,) + (False,) * (self.n_passes - 1)
         self.subpixel_method = (subpixel_method,) * self.n_passes if isinstance(subpixel_method, str) else subpixel_method
         self.n_fft = (n_fft,) * self.n_passes if isinstance(n_fft, int) else n_fft
         self.deforming_par = (deforming_par,) * self.n_passes if deforming_par == 0 or deforming_par == 1 or \
@@ -560,6 +572,7 @@ class PIVGPU:
         self.init_piv_fields()
         self.mod_get_stack = cp.RawModule(code=code_get_stack, options=("-DUSE_LONG",) if dtype_f != "float32" else ())
         self.mod_interpolate_frame = cp.RawModule(code=code_interpolate_frame, options=("-DUSE_LONG",) if dtype_f != "float32" else ())
+        self.mod_fill_matrix = cp.RawModule(code=code_fill_matrix, options=("-DUSE_LONG",) if dtype_f != "float32" else ())
     
     def __call__(self, frame_a, frame_b):
         """Computes the velocity field from an image pair.
@@ -598,19 +611,21 @@ class PIVGPU:
             
             # Get the correlation settings.
             (deforming_order,
-              is_normalized,
-              subpixel_method,
-              n_fft,
-              deforming_par,
-              batch_size,
-              s2n_method,
-              s2n_size) = next(self.corr_settings)
+             is_normalized,
+             is_masked,
+             subpixel_method,
+             n_fft,
+             deforming_par,
+             batch_size,
+             s2n_method,
+             s2n_size) = next(self.corr_settings)
             
             # Create the correlation object.
             self.corr = CorrelationGPU(frame_a, frame_b,
                                        modules=(self.mod_get_stack, self.mod_interpolate_frame),
                                        deforming_order=deforming_order,
                                        normalize=is_normalized,
+                                       mask_zero=is_masked,
                                        subpixel_method=subpixel_method,
                                        s2n_method=s2n_method,
                                        s2n_size=s2n_size,
@@ -667,7 +682,7 @@ class PIVGPU:
                                                window_size=window_size,
                                                search_size=search_size,
                                                overlap_ratio=overlap_ratio,
-                                               center=self.center,
+                                               center=self.is_centered,
                                                mask=self.mask,
                                                dtype_f=self.dtype_f))
             k += 1
@@ -693,6 +708,7 @@ class PIVGPU:
             for _ in range(ss_iters):
                 yield (self.deforming_order[i],
                        self.is_normalized[i],
+                       self.is_masked[i],
                        self.subpixel_method[i],
                        self.n_fft[i],
                        self.deforming_par[i],
@@ -794,7 +810,11 @@ class PIVGPU:
         
         # Create the replacement object.
         f_shape = self.piv_fields[self.k].field_shape
-        self.replacement = ReplacementGPU(f_shape, method=method, size=size, dtype_f=self.dtype_f)
+        self.replacement = ReplacementGPU(f_shape,
+                                          modules=self.mod_fill_matrix,
+                                          method=method,
+                                          size=size,
+                                          dtype_f=self.dtype_f)
         
         # Exclude the spurious vectors for the first replacement iteration.
         fill_value = cp.nan
@@ -911,8 +931,8 @@ class PIVFieldGPU:
         self.field_shape = self.get_field_shape(self.frame_shape, self.search_size, self.spacing)
         self.n_wins = prod(self.field_shape)
         self.dtype_f = dtype_f
-        self.center = center
-        self.offset = self.get_offset(self.frame_shape, self.field_shape, self.search_size, self.spacing, self.center)
+        self.is_centered = center
+        self.offset = self.get_offset(self.frame_shape, self.field_shape, self.search_size, self.spacing, self.is_centered)
         self.x, self.y = self.get_field_coords(self.field_shape, self.search_size, self.spacing, self.offset)
         self.x_grid = self.x[0, :]
         self.y_grid = self.y[:, 0]
@@ -976,6 +996,8 @@ class CorrelationGPU:
         Order of the interpolation used for window deformation.
     normalize : bool, optional
         Whether to normalize the window intensity by subtracting the mean intensity.
+    mask_zero: bool, optional
+        Whether to mask the center of the cross-correlation map.
     subpixel_method : {"gaussian", "centroid", "parabolic"}, optional
         Method to approximate the subpixel location of the peaks.
     s2n_method : {"peak2peak", "peak2mean", "peak2energy"}, optional
@@ -995,6 +1017,7 @@ class CorrelationGPU:
     def __init__(self, frame_a, frame_b, modules,
                  deforming_order=DEFORMING_ORDER,
                  normalize=NORMALIZE,
+                 mask_zero=MASK_ZERO,
                  subpixel_method=SUBPIXEL_METHOD,
                  s2n_method=S2N_METHOD,
                  s2n_size=S2N_SIZE,
@@ -1005,6 +1028,7 @@ class CorrelationGPU:
         self.mod_get_stack, self.mod_interpolate_frame = modules
         self.deforming_order = deforming_order
         self.is_normalized = normalize
+        self.is_masked = mask_zero
         self.subpixel_method = subpixel_method
         
         # A small value is added to the denominator for subpixel approximation.
@@ -1084,6 +1108,12 @@ class CorrelationGPU:
         
         # Correlate the windows.
         self.corr = self.correlate_windows(win_a, win_b)
+        
+        # Mask the center of the cross-correlation map.
+        if self.is_masked:
+            ic, jc = self.fft_ht // 2, self.fft_wd // 2
+            width = 0
+            self.corr[:, ic - width: ic + width + 1, jc - width: jc + width + 1] = -cp.inf
         
         # Get the first peak locations of the cross-correlation map.
         self.i_peak1, self.j_peak1 = self.get_first_peak(self.corr)
@@ -1333,7 +1363,7 @@ class CorrelationGPU:
         sig2noise = cp.where(corr_peak1 > 0, corr_peak1 / corr_peak2, sig2noise)
         
         # Set to inf if second peak is zero or negative and first peak is positive.
-        sig2noise = cp.where(cp.logical_and(corr_peak2 <= 0, corr_peak1 > 0), cp.Inf, sig2noise)
+        sig2noise = cp.where(cp.logical_and(corr_peak2 <= 0, corr_peak1 > 0), cp.inf, sig2noise)
         
         if self._field_mask is not None:
             # sig2noise is zero by default inside the mask.
@@ -1350,7 +1380,7 @@ class CorrelationGPU:
         """Returns the row and column of the second peaks in the cross-correlation map."""
         # Generate a 3D array of kernels.
         kernel_size = 2 * width + 1
-        kernels = cp.full((self.n_wins, kernel_size, kernel_size), fill_value=cp.NINF, dtype=self.dtype_f)
+        kernels = cp.full((self.n_wins, kernel_size, kernel_size), fill_value=-cp.inf, dtype=self.dtype_f)
         
         # Get the second peak locations of the cross-correlation map.
         corr = fill_kernel(corr, kernels, width, self.n_wins, self.i_peak1, self.j_peak1)
