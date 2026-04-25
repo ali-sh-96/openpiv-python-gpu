@@ -100,7 +100,7 @@ class stitch_gpu:
     
     @property
     def frame_shape(self):
-        "Returns the shape of the stitched frames."
+        """Returns the shape of the stitched frames."""
         return self.gpu_stitch.frame_shape
 
 class StitchGPU:

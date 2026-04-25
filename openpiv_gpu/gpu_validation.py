@@ -25,7 +25,7 @@ BLOCK_SIZE = 8
 ALLOWED_REPLACING_METHODS = {"spring", "median", "mean"}
 
 class ValidationGPU:
-    """Validates vector fields and returns an array indicating which locations need to be validated.
+    """Validates vector fields and returns an array indicating which locations need to be replaced.
     
     Parameters
     ----------

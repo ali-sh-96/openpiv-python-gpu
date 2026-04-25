@@ -286,7 +286,7 @@ class piv_gpu:
             (isinstance(self.mask, np.ndarray) and \
              self.mask.shape == self.frame_shape and \
                  (np.issubdtype(self.mask.dtype, np.number) or mask.dtype == bool)), \
-                "{} must be an ndarray of {} values with shape {}.".format("mask", "real", self.frame_shape)
+                    "{} must be an ndarray of {} values with shape {}.".format("mask", "real", self.frame_shape)
         
         self.mask = mask.astype(bool) if mask is not None else None
         self.frame_mask = self.mask if self.mask is not None else np.full(self.frame_shape, fill_value=False, dtype=bool)
@@ -312,25 +312,23 @@ class piv_gpu:
         
         """
         frames = [frame_a, frame_b]
-        types = (np.ndarray, cp.ndarray)
-        
-        assert all(isinstance(frame, types) for frame in frames) and \
-            all(frame.shape == self.frame_shape for frame in frames) and \
-                all(np.issubdtype(frame.dtype, np.number) for frame in frames) and \
-                    all(not np.iscomplex(frame).any() for frame in frames), \
-                        "Both frames must be an ndarray of {} values with shape {}.".format("real", self.frame_shape)
+        assert all(isinstance(frame, np.ndarray) for frame in frames) \
+            and all(frame.shape == self.frame_shape for frame in frames) \
+                and all(np.issubdtype(frame.dtype, np.number) for frame in frames) \
+                    and all(not np.iscomplexobj(frame) for frame in frames), \
+                        "Both frames must be ndarrays of {} values with shape {}.".format("real", self.frame_shape)
         
         u, v = self.gpu_process(frame_a, frame_b)
         return u.get(), v.get()
     
     @property
     def field_shape(self):
-        "Returns the field shape."
+        """Returns the field shape."""
         return self.gpu_process.piv_fields[-1].field_shape
     
     @property
     def coords(self):
-        "Returns the field coordinates."
+        """Returns the field coordinates."""
         x, y = self.gpu_process.coords
         return x.get(), y.get()
     
@@ -455,7 +453,7 @@ class PIVGPU:
         Smoothing parameter to pass to smoothn to apply to the velocity fields.
     dt : float, optional
         Time delay separating the two frames.
-    scaling_par : int, optional
+    scaling_par : float, optional
         Scaling factor to apply to the velocity fields.
     mask : ndarray or None, optional
         2D array with non-zero values indicating the masked locations.
@@ -870,7 +868,7 @@ class PIVGPU:
     
     @property
     def coords(self):
-        "Returns the field coordinates."
+        """Returns the field coordinates."""
         if self.piv_fields is None:
             self.init_piv_fields()
         x, y = self.piv_fields[-1].coords
@@ -972,12 +970,12 @@ class PIVFieldGPU:
     
     @property
     def coords(self):
-        "Returns the coordinates of the velocity field."
+        """Returns the coordinates of the velocity field."""
         return self.x, self.y
     
     @property
     def grid_coords(self):
-        "Returns the grid coordinates of the velocity field."
+        """Returns the grid coordinates of the velocity field."""
         return self.x_grid, self.y_grid
 
 class CorrelationGPU:
