@@ -1,4 +1,4 @@
-"""This module contains algorithms for PIV image analysis with an NVIDIA GPU.
+"""This module contains algorithms for PIV analysis on an NVIDIA GPU.
 Note: This module is a GPU-accelerated version of OpenPIV-Python-CPU.
 
 """

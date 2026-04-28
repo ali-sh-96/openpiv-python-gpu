@@ -1,9 +1,9 @@
 # OpenPIV-Python-GPU
-Algorithms for PIV image processing with a GPU.
+Algorithms for particle image velocimetry (PIV) on a GPU.
 
 [![DOI](https://zenodo.org/badge/774692247.svg)](https://zenodo.org/doi/10.5281/zenodo.10846418)
 
-[openpiv-python](https://github.com/OpenPIV/openpiv-python) consists of Python modules for performing particle image velocimetry (PIV) analysis on a set of image pairs. [openpiv-python-gpu](https://github.com/ali-sh-96/openpiv-python-gpu) is a GPU implementation of the same algorithms as [openpiv-python-cpu](https://github.com/ali-sh-96/openpiv-python-cpu), depending only on CuPy for GPU acceleration. The objective of this project was to reduce the PIV computation time and maintain compatibility with the CPU-based version.
+[openpiv-python](https://github.com/OpenPIV/openpiv-python) consists of Python modules for performing PIV analysis on a set of image pairs. [openpiv-python-gpu](https://github.com/ali-sh-96/openpiv-python-gpu) is a GPU implementation of the same algorithms as [openpiv-python-cpu](https://github.com/ali-sh-96/openpiv-python-cpu), depending only on CuPy for GPU acceleration. The objective of this project was to reduce the PIV computation time and maintain compatibility with the CPU-based version.
 
 ## Warning
 OpenPIV-Python is currently under active development, which means it might contain some bugs, and its API is subject to change. The algorithms have been tested on both Windows (work station and laptops) and Linux (Google Colab).
@@ -20,7 +20,12 @@ For CUDA Toolkit versions 12.x use:
 Then, use the following command to clone the repository:
 
     git clone https://github.com/ali-sh-96/openpiv-python-gpu
-Finally, add the directory of the cloned repository to your PYTHONPATH.
+
+Finally, add the directory of the cloned repository to your PYTHONPATH:
+
+    import sys
+    openpiv_gpu_path = "Path to where you cloned the repository"
+    sys.path.append(openpiv_gpu_path)
 
 ## Documentation
 The OpenPIV documentation is readily accessible on the project's webpage at https://openpiv.readthedocs.org. For information on how to use the modules, see the tutorial notebooks below. Also see [openpiv-python-cpu](https://github.com/ali-sh-96/openpiv-python-cpu) for more tutorials on stitching and masking in PIV. 
@@ -34,7 +39,7 @@ The OpenPIV documentation is readily accessible on the project's webpage at http
 1. [OpenPIV team](https://groups.google.com/forum/#!forum/openpiv-users)
 2. [Alex Liberzon](https://github.com/alexlib)
 3. [Ali Shirinzad](https://github.com/ali-sh-96)
-4. Pierre E. Sullivan
+4. [Pierre E. Sullivan](https://turbulence.mie.utoronto.ca/members/sullivan/)
 
 Copyright statement: `gpu_smoothn.py` is the GPU accelerated version of `cpu_smoothn.py`, which it self is a Python version of `smoothn.m` originally created by
 [D. Garcia](https://de.mathworks.com/matlabcentral/fileexchange/25634-smoothn), written by Prof. Lewis, and available on
