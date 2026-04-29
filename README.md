@@ -6,7 +6,7 @@ Algorithms for particle image velocimetry (PIV) on a GPU.
 [openpiv-python](https://github.com/OpenPIV/openpiv-python) consists of Python modules for performing PIV analysis on a set of image pairs. [openpiv-python-gpu](https://github.com/ali-sh-96/openpiv-python-gpu) is a GPU implementation of the same algorithms as [openpiv-python-cpu](https://github.com/ali-sh-96/openpiv-python-cpu), depending only on CuPy for GPU acceleration. The objective of this project was to reduce the PIV computation time and maintain compatibility with the CPU-based version.
 
 ## Related projects
-- [openpiv-python-gpu](https://github.com/ali-sh-96/openpiv-python-gpu)
+- [openpiv-python-cpu](https://github.com/ali-sh-96/openpiv-python-cpu)
   An alternative implementation of the same algorithms for use with a central processing unit (CPU).
 
 - [openptv-python-gpu](https://github.com/ali-sh-96/openptv-python-gpu)
